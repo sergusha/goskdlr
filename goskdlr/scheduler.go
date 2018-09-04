@@ -22,8 +22,7 @@ type Scheduler struct {
 
 	clock *time.Ticker
 
-	resume chan struct{}
-	quit   chan struct{}
+	quit chan struct{}
 
 	//jobErrors chan error
 }
@@ -38,7 +37,6 @@ func New(updatePeriod string) (*Scheduler, error) {
 	t := time.NewTicker(d)
 
 	s := &Scheduler{
-		resume:         make(chan struct{}),
 		quit:           make(chan struct{}),
 		jobsPending:    make(map[JobID]*Job),
 		jobsInProgress: make(map[JobID]*Job),
@@ -121,13 +119,6 @@ func (s *Scheduler) ScheduleJob(job *Job) error {
 	if s.jobsPending == nil {
 		return fmt.Errorf("ScheduleJob: jobsPending equals nil")
 	}
-	//resume the scheduler
-	if len(s.jobsPending) == 0 {
-		select {
-		case s.resume <- struct{}{}:
-		default:
-		}
-	}
 
 	s.jobsPending[job.id] = job
 
@@ -137,7 +128,6 @@ func (s *Scheduler) ScheduleJob(job *Job) error {
 func (s *Scheduler) run() {
 	defer func() {
 		close(s.quit)
-		close(s.resume)
 	}()
 
 	go s.runClock()
@@ -151,7 +141,6 @@ func (s *Scheduler) run() {
 			s.mx.Unlock()
 		case <-s.ctx.Done():
 			s.mx.Lock()
-			defer s.mx.Unlock()
 			jobsToCancel := s.jobsInProgress
 			s.jobsInProgress = nil
 			s.jobsPending = nil
@@ -159,6 +148,7 @@ func (s *Scheduler) run() {
 				job.cancel()
 			}
 			<-s.quit
+			s.mx.Unlock()
 			return
 		}
 
